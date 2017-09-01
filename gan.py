@@ -15,11 +15,6 @@ https://arxiv.org/abs/1606.03498.
 import argparse
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
-from matplotlib import animation
-import seaborn as sns
-
-sns.set(color_codes=True)
 
 seed = 42
 np.random.seed(seed)
@@ -144,7 +139,14 @@ class GAN(object):
 
         # Define the loss for discriminator and generator networks
         # (see the original paper for details), and create optimizers for both
+
+        # The loss for discriminator. It is getting lower if the discriminator gives a lower
+        # probability that the generated signal from G is a real signal, i.e, D2. And at the
+        # same time, it gives higher probability that the samples from true distribution is
+        # more like to be real signel.
         self.loss_d = tf.reduce_mean(-log(self.D1) - log(1 - self.D2))
+        # The loss for generator. It is getting lower if the discriminator guesses that the
+        # generated signal from G is more like to be a real signal, i.e. the probability from D2.
         self.loss_g = tf.reduce_mean(-log(self.D2))
 
         vars = tf.trainable_variables()
@@ -156,7 +158,6 @@ class GAN(object):
 
 
 def train(model, data, gen, params):
-    anim_frames = []
 
     with tf.Session() as session:
         tf.local_variables_initializer().run()
@@ -180,136 +181,6 @@ def train(model, data, gen, params):
             if step % params.log_every == 0:
                 print('{}: {:.4f}\t{:.4f}'.format(step, loss_d, loss_g))
 
-            if params.anim_path and (step % params.anim_every == 0):
-                anim_frames.append(
-                    samples(model, session, data, gen.range, params.batch_size)
-                )
-
-        if params.anim_path:
-            save_animation(anim_frames, params.anim_path, gen.range)
-        else:
-            samps = samples(model, session, data, gen.range, params.batch_size)
-            plot_distributions(samps, gen.range)
-
-
-def samples(
-    model,
-    session,
-    data,
-    sample_range,
-    batch_size,
-    num_points=10000,
-    num_bins=100
-):
-    '''
-    Return a tuple (db, pd, pg), where db is the current decision
-    boundary, pd is a histogram of samples from the data distribution,
-    and pg is a histogram of generated samples.
-    '''
-    xs = np.linspace(-sample_range, sample_range, num_points)
-    bins = np.linspace(-sample_range, sample_range, num_bins)
-
-    # decision boundary
-    db = np.zeros((num_points, 1))
-    for i in range(num_points // batch_size):
-        db[batch_size * i:batch_size * (i + 1)] = session.run(
-            model.D1,
-            {
-                model.x: np.reshape(
-                    xs[batch_size * i:batch_size * (i + 1)],
-                    (batch_size, 1)
-                )
-            }
-        )
-
-    # data distribution
-    d = data.sample(num_points)
-    pd, _ = np.histogram(d, bins=bins, density=True)
-
-    # generated samples
-    zs = np.linspace(-sample_range, sample_range, num_points)
-    g = np.zeros((num_points, 1))
-    for i in range(num_points // batch_size):
-        g[batch_size * i:batch_size * (i + 1)] = session.run(
-            model.G,
-            {
-                model.z: np.reshape(
-                    zs[batch_size * i:batch_size * (i + 1)],
-                    (batch_size, 1)
-                )
-            }
-        )
-    pg, _ = np.histogram(g, bins=bins, density=True)
-
-    return db, pd, pg
-
-
-def plot_distributions(samps, sample_range):
-    db, pd, pg = samps
-    db_x = np.linspace(-sample_range, sample_range, len(db))
-    p_x = np.linspace(-sample_range, sample_range, len(pd))
-    f, ax = plt.subplots(1)
-    ax.plot(db_x, db, label='decision boundary')
-    ax.set_ylim(0, 1)
-    plt.plot(p_x, pd, label='real data')
-    plt.plot(p_x, pg, label='generated data')
-    plt.title('1D Generative Adversarial Network')
-    plt.xlabel('Data values')
-    plt.ylabel('Probability density')
-    plt.legend()
-    plt.show()
-
-
-def save_animation(anim_frames, anim_path, sample_range):
-    f, ax = plt.subplots(figsize=(6, 4))
-    f.suptitle('1D Generative Adversarial Network', fontsize=15)
-    plt.xlabel('Data values')
-    plt.ylabel('Probability density')
-    ax.set_xlim(-6, 6)
-    ax.set_ylim(0, 1.4)
-    line_db, = ax.plot([], [], label='decision boundary')
-    line_pd, = ax.plot([], [], label='real data')
-    line_pg, = ax.plot([], [], label='generated data')
-    frame_number = ax.text(
-        0.02,
-        0.95,
-        '',
-        horizontalalignment='left',
-        verticalalignment='top',
-        transform=ax.transAxes
-    )
-    ax.legend()
-
-    db, pd, _ = anim_frames[0]
-    db_x = np.linspace(-sample_range, sample_range, len(db))
-    p_x = np.linspace(-sample_range, sample_range, len(pd))
-
-    def init():
-        line_db.set_data([], [])
-        line_pd.set_data([], [])
-        line_pg.set_data([], [])
-        frame_number.set_text('')
-        return (line_db, line_pd, line_pg, frame_number)
-
-    def animate(i):
-        frame_number.set_text(
-            'Frame: {}/{}'.format(i, len(anim_frames))
-        )
-        db, pd, pg = anim_frames[i]
-        line_db.set_data(db_x, db)
-        line_pd.set_data(p_x, pd)
-        line_pg.set_data(p_x, pg)
-        return (line_db, line_pd, line_pg, frame_number)
-
-    anim = animation.FuncAnimation(
-        f,
-        animate,
-        init_func=init,
-        frames=len(anim_frames),
-        blit=True
-    )
-    anim.save(anim_path, fps=30, extra_args=['-vcodec', 'libx264'])
-
 
 def main(args):
     model = GAN(args)
@@ -328,10 +199,6 @@ def parse_args():
                         help='use minibatch discrimination')
     parser.add_argument('--log-every', type=int, default=10,
                         help='print loss after this many steps')
-    parser.add_argument('--anim-path', type=str, default=None,
-                        help='path to the output animation file')
-    parser.add_argument('--anim-every', type=int, default=1,
-                        help='save every Nth frame for animation')
     return parser.parse_args()
 
 
